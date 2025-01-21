@@ -235,84 +235,6 @@ from threading import Thread
 
 from pymor.algorithms.hapod import LifoExecutor, FakeExecutor, std_local_eps
 
-"""
-def hasvd(
-    tree,
-    submatrix,
-    local_eps,
-    product=None,
-    svd_method=np.linalg.svd,
-    executor=None,
-    eval_snapshots_in_executor=False,
-):
-    logger = getLogger("hasvd")
-
-    node_finished_events = defaultdict(asyncio.Event)
-
-    async def hasvd_step(node):
-        if node.after:
-            await asyncio.wait(
-                [
-                    asyncio.create_task(node_finished_events[a].wait())
-                    for a in node.after
-                ]
-            )
-
-        if node.children:
-            modes, svals, snap_counts = zip(
-                *await asyncio.gather(
-                    *(spawn_rng(hasvd_step(c)) for c in node.children)
-                )
-            )
-            for m, sv in zip(modes, svals):
-                m.scal(sv)
-            U = modes[0]
-            for V in modes[1:]:
-                U.append(V, remove_from_other=True)
-            snap_count = sum(snap_counts)
-        else:
-            logger.info(f'Obtaining snapshots for node {node.tag or ""} ...')
-            if eval_snapshots_in_executor:
-                U = await executor.submit(submatrix, node)
-            else:
-                U = submatrix(node)
-            snap_count = len(U)
-
-        eps = local_eps(node, snap_count, len(U))
-        if eps:
-            logger.info("Computing intermediate POD ...")
-            modes, svals = await executor.submit(
-                svd_method, U, eps, not node.parent, product
-            )
-        else:
-            modes, svals = U.copy(), np.ones(len(U))
-        if node.tag is not None:
-            node_finished_events[node.tag].set()
-        return modes, svals, snap_count
-
-    # wrap Executer to ensure LIFO ordering of tasks
-    # this ensures that PODs of parent nodes are computed as soon as all input data
-    # is available
-    if executor is not None:
-        executor = LifoExecutor(executor)
-    else:
-        executor = FakeExecutor
-
-    # run new asyncio event loop in separate thread to not interfere with
-    # already running event loops (e.g. jupyter)
-
-    def main():
-        nonlocal result
-        result = asyncio.run(hasvd_step(tree))
-
-    result = None
-    hapod_thread = Thread(target=spawn_rng(main))
-    hapod_thread.start()
-    hapod_thread.join()
-    return result
-
-"""
-
 
 def hasvd(
     tree,
@@ -322,6 +244,28 @@ def hasvd(
     executor=None,
     eval_snapshots_in_executor=False,
 ):
+    """HASVD
+
+    Parameters
+    ----------
+    tree : Tree <hasvd_Node>
+        HASVD tree.
+    snapshots : Map
+        Snapshot matrix map
+    local_eps : _type_
+        _description_
+    svd_method : Function, optional
+        The method of SVD to compute matrix, by default np.linalg.svd
+    executor : _type_, optional
+        _description_, by default None
+    eval_snapshots_in_executor : bool, optional
+        _description_, by default False
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
     logger = logging.getLogger("hierarchical hasvd")
     logger.setLevel(logging.DEBUG)
 
