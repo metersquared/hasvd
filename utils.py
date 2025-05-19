@@ -69,7 +69,8 @@ def array_to_hankel(
         m = block_shape[1]
         first_column = np.zeros(n)
         last_row = np.zeros(m)
-        array = array[block_coord[0] + block_coord[1] :]
+        array = array[block_coord[0] * block_shape[1] + block_coord[1] :]
+        print(array)
 
     for i in range(n):
         first_column[i] = array[i]
@@ -100,6 +101,80 @@ def random_hankel(n: int, m: int, rng: np.random.Generator, low_rank=True):
     if low_rank:
         array = array / np.exp(np.arange(n + m - 1))
     return array_to_hankel(array, (n, m))
+
+
+def blocks_to_hankel(
+    M: int, N: int, blocks: list[np.ndarray], block_shape: tuple[int, int]
+):
+    """
+    Create a block Hankel matrix from a list of blocks.
+
+    Parameters
+    ----------
+    M : int
+        Number of rows in the block Hankel matrix.
+    N : int
+        Number of columns in the block Hankel matrix.
+    blocks : list[np.ndarray]
+        List of blocks to be arranged in the Hankel structure.
+    block_shape : tuple[int, int]
+        Shape of each block.
+
+    Returns
+    -------
+    np.ndarray
+        Block Hankel matrix.
+    """
+    assert len(blocks) == M + N - 1
+
+    # Create an empty array for the block Hankel matrix
+    hankel_matrix = np.zeros((M * block_shape[0], N * block_shape[1]))
+
+    for i in range(M):
+        for j in range(N):
+            hankel_matrix[
+                i * block_shape[0] : (i + 1) * block_shape[0],
+                j * block_shape[1] : (j + 1) * block_shape[1],
+            ] = blocks[i + j]
+
+    return hankel_matrix
+
+
+def blocks_to_toeplitz(
+    M: int, N: int, blocks: list[np.ndarray], block_shape: tuple[int, int]
+):
+    """
+    Create a block Toeplitz matrix from a list of blocks.
+
+    Parameters
+    ----------
+    M : int
+        Number of rows in the block Toeplitz matrix.
+    N : int
+        Number of columns in the block Toeplitz matrix.
+    blocks : list[np.ndarray]
+        List of blocks to be arranged in the Toeplitz structure.
+    block_shape : tuple[int, int]
+        Shape of each block.
+
+    Returns
+    -------
+    np.ndarray
+        Block Toeplitz matrix.
+    """
+    assert len(blocks) == M + N - 1
+
+    # Create an empty array for the block Toeplitz matrix
+    toeplitz_matrix = np.zeros((M * block_shape[0], N * block_shape[1]))
+
+    for i in range(M):
+        for j in range(N):
+            toeplitz_matrix[
+                i * block_shape[0] : (i + 1) * block_shape[0],
+                j * block_shape[1] : (j + 1) * block_shape[1],
+            ] = blocks[j - i]
+
+    return toeplitz_matrix
 
 
 def array_to_toeplitz(
@@ -187,9 +262,15 @@ def method_of_snapshots(
     E = E[sorted_indices]
     V = V[:, sorted_indices]
 
+    # Determine truncation index based on the sum of smallest eigenvalues
+    cumulative_sum = np.sqrt(np.cumsum(E[::-1])[::-1])  # Reverse cumulative sum
+    truncation_index = np.searchsorted(
+        cumulative_sum <= truncate_tol, True, side="left"
+    )
+
     # Truncate small eigenvalues
     if not full_matrices:
-        valid_indices = E > max(truncate_tol, 0)
+        valid_indices = np.arange(len(E)) < truncation_index
         V = V[:, valid_indices]
         E = E[valid_indices]
 
@@ -199,6 +280,42 @@ def method_of_snapshots(
     U = A @ V @ np.diag(scaling_factors)
 
     return U, np.sqrt(safe_eigenvalues), V.T
+
+
+def svd_with_tol(A: np.ndarray, full_matrices=False, truncate_tol=np.finfo(float).eps):
+    """
+    Wrapper for np.linalg.svd with truncation based on a tolerance.
+
+    Parameters
+    ----------
+    A : np.ndarray
+        Matrix to compute SVD of.
+    full_matrices : bool, optional
+        Whether to compute full or reduced SVD, by default False.
+    truncate_tol : float, optional
+        Tolerance for truncating small singular values, by default machine epsilon.
+
+    Returns
+    -------
+    U : np.ndarray
+        Left singular vectors.
+    s : np.ndarray
+        Singular values.
+    Vh : np.ndarray
+        Right singular vectors (transposed).
+    """
+    U, s, Vh = np.linalg.svd(A, full_matrices=full_matrices)
+    cumulative_sum = np.sqrt(np.cumsum(np.square(s[::-1]))[::-1])
+    truncation_index = np.searchsorted(
+        cumulative_sum <= truncate_tol, True, side="left"
+    )
+
+    if not full_matrices:
+        valid = np.arange(len(s)) < truncation_index
+        U = U[:, valid]
+        s = s[valid]
+        Vh = Vh[valid, :]
+    return U, s, Vh
 
 
 def dist_hasvd(A: np.ndarray, partitions: int, truncate=False, truncate_tol=1e-16):
@@ -399,15 +516,21 @@ class hasvd_Node(Node):
                     else:
                         line = "| " + line
                     p = p.parent
-                if node.direction == 0:
-                    line += "+-o"
-                else:
-                    line += "+-x"
+                match node.direction:
+                    case 0:
+                        line += "+-o"
+                    case 1:
+                        line += "+-r"
+                    case 2:
+                        line += "+-c"
             else:
-                if node.direction == 0:
-                    line += "o"
-                else:
-                    line += "x"
+                match node.direction:
+                    case 0:
+                        line += "o"
+                    case 1:
+                        line += "r"
+                    case 2:
+                        line += "c"
             if node.tag is not None:
                 line += f" {node.tag}"
             if node.after:
@@ -448,3 +571,203 @@ def dist_hasvd_tree(num_slices, arity=None, direction=0):
     add_children(tree, np.arange(num_slices))
 
     return tree
+
+
+def two_level_bidir_dist_hasvd_tree(
+    num_outer_slices: int,
+    num_inner_slices: int,
+    outer_direction: int = 0,
+    inner_direction: int = 1,
+):
+    """
+    Build a two-level hierarchical HASVD tree with full control over slice partitioning and directions.
+
+    Parameters
+    ----------
+    num_outer_slices : int
+        Number of top-level groups (outer partitions).
+    num_inner_slices : int
+        Number of inner slices per outer group (inner partitions).
+    outer_direction : int, optional
+        Aggregation direction at the outer level (default: 0).
+    inner_direction : int, optional
+        Aggregation direction at the inner level (default: 1).
+
+    Returns
+    -------
+    hasvd_Node
+        Root of the constructed HASVD tree.
+    """
+    total_slices = num_outer_slices * num_inner_slices
+
+    root = hasvd_Node(tag="root", direction=outer_direction)
+
+    # Inner nodes get tags 0, 1, ..., total_slices-1
+    # Outer nodes get tags total_slices, total_slices+1, ...
+    outer_tag = total_slices + 1
+    for outer_idx in range(num_outer_slices):
+        outer_node = root.add_child(tag=outer_tag, direction=inner_direction)
+        outer_tag += 1
+        for inner_idx in range(num_inner_slices):
+            inner_tag = outer_idx * num_inner_slices + inner_idx + 1
+            outer_node.add_child(tag=inner_tag)
+
+    return root
+
+
+def two_level_bidir_inc_hasvd_tree(
+    num_outer_slices: int,
+    num_inner_slices: int,
+    outer_direction: int = 0,
+    inner_direction: int = 1,
+):
+    """
+    Build a two-level hierarchical HASVD tree with full control over slice partitioning and directions.
+
+    Parameters
+    ----------
+    num_outer_slices : int
+        Number of top-level groups (outer partitions).
+    num_inner_slices : int
+        Number of inner slices per outer group (inner partitions).
+    outer_direction : int, optional
+        Aggregation direction at the outer level (default: 0).
+    inner_direction : int, optional
+        Aggregation direction at the inner level (default: 1).
+
+    Returns
+    -------
+    hasvd_Node
+        Root of the constructed HASVD tree.
+    """
+    total_slices = num_outer_slices * num_inner_slices
+
+    root = hasvd_Node(tag="root", direction=outer_direction)
+
+    node_idx = 1
+    parent_node = root
+    for outer_idx in range(num_outer_slices):
+        outer_node = parent_node.add_child(tag=node_idx, direction=inner_direction)
+        node_idx += 1
+        for inner_idx in range(num_inner_slices):
+            outer_node.add_child(tag=node_idx)
+            node_idx += 1
+        if outer_idx < num_outer_slices - 2:
+            merge_node = parent_node.add_child(tag=node_idx, direction=outer_direction)
+            node_idx += 1
+            parent_node = merge_node
+    return root
+
+
+# Graphs and trees
+
+import networkx as nx
+import matplotlib.pyplot as plt
+
+rng = np.random.default_rng(42)
+
+
+def random_kary_tree(n, k):
+    nxG = nx.Graph()
+    node_count = 1
+    nxG.add_node(r"$\rho$")
+    parent_count = 0
+    leaf_nodes = [r"$\rho$"]
+    while parent_count < n:
+        for leaf_node in leaf_nodes:
+            child_count = rng.choice(np.append(0, np.arange(2, k + 1)))
+            for i in range(child_count):
+                node_count = node_count + 1
+                nxG.add_node(node_count)
+                nxG.add_edge(node_count, leaf_node)
+                leaf_nodes.append(node_count)
+            if child_count > 0:
+                parent_count = parent_count + 1
+                leaf_nodes.remove(leaf_node)
+            if parent_count == n:
+                break
+    pos = nx.nx_agraph.graphviz_layout(
+        nxG,
+        prog="dot",
+        args=f"-Groot={1}",
+    )
+    return nxG, pos, leaf_nodes
+
+
+def graphviz_for_tree(nxG: nx.Graph):
+    return nx.nx_agraph.graphviz_layout(
+        nxG,
+        prog="dot",
+        args=f"-Groot={1}",
+    )
+
+
+def draw_nxgraph(root: hasvd_Node, node_size=1000):
+    nxG = nx.Graph()
+
+    options = {"node_color": "white", "edgecolors": "black", "node_size": node_size}
+
+    optionsRow = {
+        "node_color": "tab:red",
+        "edgecolors": "black",
+        "node_shape": "s",
+        "node_size": node_size,
+    }
+
+    optionsCol = {
+        "node_color": "tab:blue",
+        "edgecolors": "black",
+        "node_shape": "D",
+        "node_size": node_size,
+    }
+
+    leafNodes = []
+    columnNodes = []
+    rowNodes = []
+
+    # Specify the root node
+    root_node = root.tag
+
+    # Add edges (example)
+    for node in root.traverse():
+        nxG.add_node(node.tag)
+        if node.parent and node.tag != root.tag:
+            nxG.add_edge(node.parent.tag, node.tag)
+        match node.direction:
+            case 0:
+                leafNodes.append(node.tag)
+            case 1:
+                rowNodes.append(node.tag)
+            case 2:
+                columnNodes.append(node.tag)
+
+    # Generate the layout using graphviz_layout
+    pos = nx.nx_agraph.graphviz_layout(
+        nxG,
+        prog="dot",
+        args=f"-Groot={root_node}",
+    )
+
+    # Draw the graph
+    plt.figure(figsize=(20, 20))
+    plt.axis("off")
+    plt.rcParams["text.usetex"] = True
+    nx.draw(nxG, pos)
+    nx.draw_networkx_nodes(nxG, pos, nodelist=leafNodes, **options)
+    nx.draw_networkx_nodes(nxG, pos, nodelist=rowNodes, **optionsRow)
+    nx.draw_networkx_nodes(nxG, pos, nodelist=columnNodes, **optionsCol)
+    nx.draw_networkx_edges(nxG, pos, edgelist=nxG.edges())
+    nx.draw_networkx_labels(
+        nxG,
+        pos,
+        {n: n for n in columnNodes + rowNodes if n in pos},
+        font_size=24,
+        font_color="white",
+    )
+    nx.draw_networkx_labels(
+        nxG,
+        pos,
+        {n: n for n in leafNodes if n in pos},
+        font_size=24,
+        font_color="black",
+    )
