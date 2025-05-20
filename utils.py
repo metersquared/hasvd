@@ -55,28 +55,22 @@ def array_to_hankel(
     block_coord: tuple[int, int] = None,
     block_shape: tuple[int, int] = None,
 ):
-    n = shape[0]
-    m = shape[1]
-    assert n + m - 1 == len(array)
+    n, m = shape
 
     if block_coord is None and block_shape is None:
-        first_column = np.zeros(n)
-        last_row = np.zeros(m)
+        # Full Hankel matrix
+        assert len(array) == n + m - 1
+        first_column = array[:n]
+        last_row = array[n - 1 :]
     else:
-        assert block_shape[0] - 1 + block_coord[0] < n
-        assert block_shape[1] - 1 + block_coord[1] < m
-        n = block_shape[0]
-        m = block_shape[1]
-        first_column = np.zeros(n)
-        last_row = np.zeros(m)
-        array = array[block_coord[0] * block_shape[1] + block_coord[1] :]
-        print(array)
-
-    for i in range(n):
-        first_column[i] = array[i]
-
-    for i in range(m):
-        last_row[i] = array[i + n - 1]
+        i, j = block_coord
+        p, q = block_shape
+        assert i + p <= n and j + q <= m, "Block goes out of matrix bounds"
+        offset = i + j
+        block_len = p + q - 1
+        block_array = array[offset : offset + block_len]
+        first_column = block_array[:p]
+        last_row = block_array[p - 1 :]
 
     return scla.hankel(first_column, last_row)
 
@@ -357,7 +351,7 @@ def hasvd(
     tree,
     snapshots,
     local_eps,
-    svd_method=np.linalg.svd,
+    svd_method=svd_with_tol,
     executor=None,
     eval_snapshots_in_executor=False,
 ):
@@ -426,25 +420,25 @@ def hasvd(
                 A = np.hstack([v.T * s for v, s in zip(Vh_parts, svals_parts)])
 
         else:
-            logger.info(f'Obtaining snapshots for node {node.tag or ""} ...')
+            eps = local_eps(node)
+            # logger.info(f'Obtaining snapshots for node {node.tag or ""} ...')
 
             if eval_snapshots_in_executor:
                 A = await executor.submit(snapshots, node)
             else:
                 A = snapshots(node)
-
-            U, svals, Vh = svd_method(A, full_matrices=False)
+            U, svals, Vh = svd_method(A, full_matrices=False, truncate_tol=eps)
             return U, svals, Vh
 
-        snap_count = sum(len(s) for s in svals_parts)
-        eps = local_eps(node, snap_count, A.shape[1])
+        # snap_count = sum(len(s) for s in svals_parts)
+        eps = local_eps(node)
         if eps:
-            logger.info(f'Computing SVD at node {node.tag or ""} ...')
+            # logger.info(f'Computing SVD at node {node.tag or ""} ...')
             if node.direction == 0:
-                U, svals, Vh = svd_method(A, full_matrices=False)
+                U, svals, Vh = svd_method(A, full_matrices=False, truncate_tol=eps)
                 Vh = Vh @ scla.block_diag(*Vh_parts)
             elif node.direction == 1:
-                V, svals, Uh = svd_method(A, full_matrices=False)
+                V, svals, Uh = svd_method(A, full_matrices=False, truncate_tol=eps)
                 U = scla.block_diag(*U_parts) @ Uh.T
                 Vh = V.T
         else:
@@ -452,7 +446,6 @@ def hasvd(
 
         if node.tag is not None:
             node_finished_events[node.tag].set()
-
         return U, svals, Vh
 
     if executor is not None:
@@ -480,9 +473,19 @@ from pymor.algorithms.hapod import Node
 class hasvd_Node(Node):
     """docstring for hasvd_Node."""
 
-    def __init__(self, direction=0, tag=None, parent=None, after=None):
+    def __init__(
+        self,
+        shape: tuple[int, int] = None,
+        direction=0,
+        tag=None,
+        parent=None,
+        after=None,
+    ):
         super().__init__(tag=tag, parent=parent, after=after)
         self.direction = direction
+        self.m = shape[0]
+        self.n = shape[1]
+        self.root = parent.root if parent else self
 
     def add_child(self, direction=0, tag=None, after=None, **kwargs):
         return hasvd_Node(
@@ -578,6 +581,7 @@ def two_level_bidir_dist_hasvd_tree(
     num_inner_slices: int,
     outer_direction: int = 0,
     inner_direction: int = 1,
+    block_shape: tuple[int, int] = None,
 ):
     """
     Build a two-level hierarchical HASVD tree with full control over slice partitioning and directions.
@@ -599,18 +603,25 @@ def two_level_bidir_dist_hasvd_tree(
         Root of the constructed HASVD tree.
     """
     total_slices = num_outer_slices * num_inner_slices
-
-    root = hasvd_Node(tag="root", direction=outer_direction)
+    root = hasvd_Node(
+        tag="root",
+        direction=outer_direction,
+        shape=(num_outer_slices * block_shape[0], num_inner_slices * block_shape[1]),
+    )
 
     # Inner nodes get tags 0, 1, ..., total_slices-1
     # Outer nodes get tags total_slices, total_slices+1, ...
     outer_tag = total_slices + 1
     for outer_idx in range(num_outer_slices):
-        outer_node = root.add_child(tag=outer_tag, direction=inner_direction)
+        outer_node = root.add_child(
+            tag=outer_tag,
+            direction=inner_direction,
+            shape=(block_shape[0], num_inner_slices * block_shape[1]),
+        )
         outer_tag += 1
         for inner_idx in range(num_inner_slices):
             inner_tag = outer_idx * num_inner_slices + inner_idx + 1
-            outer_node.add_child(tag=inner_tag)
+            outer_node.add_child(tag=inner_tag, shape=(block_shape[0], block_shape[1]))
 
     return root
 
@@ -620,6 +631,7 @@ def two_level_bidir_inc_hasvd_tree(
     num_inner_slices: int,
     outer_direction: int = 0,
     inner_direction: int = 1,
+    block_shape: tuple[int, int] = None,
 ):
     """
     Build a two-level hierarchical HASVD tree with full control over slice partitioning and directions.
@@ -640,21 +652,37 @@ def two_level_bidir_inc_hasvd_tree(
     hasvd_Node
         Root of the constructed HASVD tree.
     """
-    total_slices = num_outer_slices * num_inner_slices
+    total_leaves = num_outer_slices * num_inner_slices
+    root = hasvd_Node(
+        tag="root",
+        direction=outer_direction,
+        shape=(num_outer_slices * block_shape[0], num_inner_slices * block_shape[1]),
+    )
 
-    root = hasvd_Node(tag="root", direction=outer_direction)
-
-    node_idx = 1
+    leaf_tag = 1
+    outer_tag = total_leaves + 1
     parent_node = root
+
     for outer_idx in range(num_outer_slices):
-        outer_node = parent_node.add_child(tag=node_idx, direction=inner_direction)
-        node_idx += 1
+        outer_node = parent_node.add_child(
+            tag=outer_tag,
+            direction=inner_direction,
+            shape=(block_shape[0], num_inner_slices * block_shape[1]),
+        )
+        outer_tag += 1
         for inner_idx in range(num_inner_slices):
-            outer_node.add_child(tag=node_idx)
-            node_idx += 1
+            outer_node.add_child(tag=leaf_tag, shape=(block_shape[0], block_shape[1]))
+            leaf_tag += 1
         if outer_idx < num_outer_slices - 2:
-            merge_node = parent_node.add_child(tag=node_idx, direction=outer_direction)
-            node_idx += 1
+            merge_node = parent_node.add_child(
+                tag=outer_tag,
+                direction=outer_direction,
+                shape=(
+                    (num_outer_slices - 1 - outer_idx) * block_shape[0],
+                    num_inner_slices * block_shape[1],
+                ),
+            )
+            outer_tag += 1
             parent_node = merge_node
     return root
 
