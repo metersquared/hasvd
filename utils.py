@@ -487,7 +487,7 @@ class hasvd_Node(Node):
         self.n = shape[1]
         self.root = parent.root if parent else self
 
-    def add_child(self, direction=0, tag=None, after=None, **kwargs):
+    def add_child(self, direction=2, tag=None, after=None, **kwargs):
         return hasvd_Node(
             direction=direction, tag=tag, parent=self, after=after, **kwargs
         )
@@ -762,11 +762,11 @@ def draw_nxgraph(root: hasvd_Node, node_size=1000):
         if node.parent and node.tag != root.tag:
             nxG.add_edge(node.parent.tag, node.tag)
         match node.direction:
-            case 0:
-                leafNodes.append(node.tag)
-            case 1:
-                rowNodes.append(node.tag)
             case 2:
+                leafNodes.append(node.tag)
+            case 0:
+                rowNodes.append(node.tag)
+            case 1:
                 columnNodes.append(node.tag)
 
     # Generate the layout using graphviz_layout
@@ -777,7 +777,7 @@ def draw_nxgraph(root: hasvd_Node, node_size=1000):
     )
 
     # Draw the graph
-    plt.figure(figsize=(20, 20))
+    plt.figure(figsize=(10, 10))
     plt.axis("off")
     plt.rcParams["text.usetex"] = True
     nx.draw(nxG, pos)

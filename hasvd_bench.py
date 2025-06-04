@@ -161,6 +161,7 @@ def bench(M, N, m, n, eps, omega):
     runtime_svd = time.time() - start_time
     # print("SVD of the whole matrix")
     err_svd = np.linalg.norm(A - U @ np.diag(E) @ Vh)
+    rk = len(E)
     # print("Error:", err_svd)
 
     # DISTRIBUTED HASVD
@@ -209,6 +210,7 @@ def bench(M, N, m, n, eps, omega):
     )
     runtime_dist_naive = time.time() - start_time
     err_dist_naive = np.linalg.norm(A - U1 @ np.diag(E1) @ Vh1)
+    rk_dist_naive = len(E1)
     # print("Naive Error:", err_dist_naive)
 
     # TIGHT ERROR
@@ -229,6 +231,7 @@ def bench(M, N, m, n, eps, omega):
     )
     runtime_dist_tight = time.time() - start_time
     err_dist_tight = np.linalg.norm(A - U1 @ np.diag(E1) @ Vh1)
+    rk_dist_tight = len(E1)
     # print("Tight Error:", err_dist_tight)
 
     # INCREMENTAL HASVD
@@ -272,6 +275,7 @@ def bench(M, N, m, n, eps, omega):
     U2, E2, Vh2 = utils.hasvd(tree, get_inc_hasvd_block, local_eps=get_inc_naive_error)
     runtime_inc_naive = time.time() - start_time
     err_inc_naive = np.linalg.norm(A - U2 @ np.diag(E2) @ Vh2)
+    rk_inc_naive = len(E2)
     # print("Error:", err_inc_naive)
 
     # TIGHT ERROR
@@ -289,32 +293,45 @@ def bench(M, N, m, n, eps, omega):
     U2, E2, Vh2 = utils.hasvd(tree, get_inc_hasvd_block, local_eps=get_inc_tight_error)
     runtime_inc_tight = time.time() - start_time
     err_inc_tight = np.linalg.norm(A - U2 @ np.diag(E2) @ Vh2)
+    rk_inc_tight = len(E2)
     # print("Error:", err_inc_tight)
 
     return (
         A.shape,
         rank,
         err_svd,
-        runtime_svd,
+        rk,
         err_dist_naive,
-        runtime_dist_naive,
+        rk_dist_naive,
         err_dist_tight,
-        runtime_dist_tight,
+        rk_dist_tight,
         err_inc_naive,
-        runtime_inc_naive,
+        rk_inc_naive,
         err_inc_tight,
-        runtime_inc_tight,
+        rk_inc_tight,
     )
 
 
 if __name__ == "__main__":
     # All combinations of arguments for the benchmark
-    M = [10, 20, 50, 100, 200]
-    N = [10, 20, 50, 100, 200]
-    m = [2, 5, 10, 20]
-    n = [2, 5, 10, 20]
-    eps = [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
-    omega = [0.1, 0.5, 0.9]
+    M = [100]
+    N = [200]
+    m = [10]
+    n = [20]
+    eps = [
+        0.000001,
+        0.000005,
+        0.00001,
+        0.00005,
+        0.0001,
+        0.0005,
+        0.001,
+        0.005,
+        0.01,
+        0.05,
+        0.1,
+    ]
+    omega = [0.1]
 
     # Create a list of all combinations of arguments
     combinations = [
@@ -343,15 +360,15 @@ if __name__ == "__main__":
     # Add columns for results, initialized with NaN
     df["rank"] = np.nan
     df["error"] = np.nan
-    df["rt"] = np.nan
+    df["rk"] = np.nan
     df["error_dist_naive"] = np.nan
-    df["rt_dist_naive"] = np.nan
+    df["rk_dist_naive"] = np.nan
     df["error_dist_tight"] = np.nan
-    df["rt_dist_tight"] = np.nan
+    df["rk_dist_tight"] = np.nan
     df["error_inc_naive"] = np.nan
-    df["rt_inc_naive"] = np.nan
+    df["rk_inc_naive"] = np.nan
     df["error_inc_tight"] = np.nan
-    df["rt_inc_tight"] = np.nan
+    df["rk_inc_tight"] = np.nan
 
     # Run the benchmark for each combination of arguments and immediately store the results in csv after loop
     for i, (M_val, N_val, m_val, n_val, eps_val, omega_val) in enumerate(combinations):
@@ -360,15 +377,15 @@ if __name__ == "__main__":
             shape,
             rank,
             err_svd,
-            rt,
+            rk,
             err_dist_naive,
-            rt_dist_naive,
+            rk_dist_naive,
             err_dist_tight,
-            rt_dist_tight,
+            rk_dist_tight,
             err_inc_naive,
-            rt_inc_naive,
+            rk_inc_naive,
             err_inc_tight,
-            rt_inc_tight,
+            rk_inc_tight,
         ) = bench(M_val, N_val, m_val, n_val, eps_val, omega_val)
         df.loc[i] = [
             M_val,
@@ -379,19 +396,19 @@ if __name__ == "__main__":
             omega_val,
             rank,
             err_svd,
-            rt,
+            rk,
             err_dist_naive,
-            rt_dist_naive,
+            rk_dist_naive,
             err_dist_tight,
-            rt_dist_tight,
+            rk_dist_tight,
             err_inc_naive,
-            rt_inc_naive,
+            rk_inc_naive,
             err_inc_tight,
-            rt_inc_tight,
+            rk_inc_tight,
         ]
 
         # Save the dataframe to a CSV file
-        df.to_csv("benchmark_results.csv", index=False)
+        df.to_csv("benchmark_results_2.csv", index=False)
 
 
 # %%

@@ -136,8 +136,8 @@ def tight_error(
 
 if __name__ == "__main__":
 
-    M = 1000
-    N = 1000
+    M = 4
+    N = 3
     m = 5
     n = 2
     rng = np.random.default_rng(12)
@@ -167,7 +167,7 @@ if __name__ == "__main__":
     print("\u0332".join("Distributed HASVD"))
     # Create a tree for the distributed HASVD
     tree = utils.two_level_bidir_dist_hasvd_tree(M, N, 1, 0, block_shape=(m, n))
-    # utils.draw_nxgraph(tree)
+    utils.draw_nxgraph(tree)
 
     # Create mapping of nodes to their corresponding matrix blocks
     node_to_block = nodemap_hasvd(
@@ -229,7 +229,7 @@ if __name__ == "__main__":
     print("\u0332".join("Incremental HASVD"))
     # Create a tree for the incremental HASVD
     tree = utils.two_level_bidir_inc_hasvd_tree(M, N, 1, 0, (m, n))
-    # utils.draw_nxgraph(tree)
+    utils.draw_nxgraph(tree)
     # Create mapping of nodes to their corresponding matrix blocks
     node_to_block = nodemap_hasvd(
         tree,
