@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 # %%
-nxG, pos, leaf_nodes = utils.random_kary_tree(4, 6)
+nxG, pos, leaf_nodes = utils.random_kary_tree(3, 4)
 
 # options
 optionsLeaf = {"node_color": "white", "edgecolors": "black"}
@@ -29,9 +29,16 @@ nx.draw_networkx_nodes(
 nx.draw_networkx_labels(
     nxG,
     pos,
-    {n: n for n in root_node if n in pos},
+    {n: n for n in nxG.nodes if n in pos and n not in leaf_nodes},
     font_color="white",
 )
+nx.draw_networkx_labels(
+    nxG,
+    pos,
+    {n: n for n in nxG.nodes if n in pos and n in leaf_nodes},
+    font_color="black",
+)
 nx.draw_networkx_edges(nxG, pos, edgelist=nxG.edges())
+plt.savefig("error-bound.png", transparent=True)
 
 # %%
