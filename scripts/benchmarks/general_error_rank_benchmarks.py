@@ -12,7 +12,7 @@ N = 20
 m = 100
 n = 100
 rng = np.random.Generator(np.random.MT19937(42))
-trials = 3
+trials = 10
 direction = 1
 set_rank = 20
 
@@ -26,7 +26,7 @@ else:
     block_m = m
 
 tree_list = [
-    trees.dist_hasvd_tree(partition, direction, (block_m, block_n)),
+    # trees.dist_hasvd_tree(partition, direction, (block_m, block_n)),
     trees.inc_hasvd_tree(partition, direction, (block_m, block_n)),
 ]
 
@@ -82,16 +82,16 @@ def bench(tol, omega):
     err_lapack = np.mean(err_lapack)
     rank = np.mean(rank)
     for i in range(len(tree_list)):
-        # err_naive[i] = np.mean(err_naive[i])
+        err_naive[i] = np.mean(err_naive[i])
         err_tight[i] = np.mean(err_tight[i])
-        # rank_naive[i] = np.mean(rank_naive[i])
+        rank_naive[i] = np.mean(rank_naive[i])
         rank_tight[i] = np.mean(rank_tight[i])
 
-    return err_lapack, rank, err_tight, rank_tight
+    return err_lapack, rank, err_naive, rank_naive, err_tight, rank_tight
 
 
 if __name__ == "__main__":
-    eps = [4e-2, 2e-2, 9e-3, 7e-3, 5e-3, 3e-3, 1e-3, 8e-4, 6e-4, 4e-4]
+    eps = [5e-2, 4e-2, 3e-2, 2e-2, 1e-2, 9e-3, 8e-3, 7e-3, 6e-3, 5e-3]
     omegas = [0.1, 0.25, 0.5, 0.75, 0.9]
 
     combinations = [(eps_val, omega_val) for eps_val in eps for omega_val in omegas]
@@ -110,8 +110,8 @@ if __name__ == "__main__":
     df["rk"] = np.nan
     # df["err_naive_0"] = np.nan
     # df["rk_naive_0"] = np.nan
-    df["err_tight_0"] = np.nan
-    df["rk_tight_0"] = np.nan
+    # df["err_tight_0"] = np.nan
+    # df["rk_tight_0"] = np.nan
 
     # df["err_naive_1"] = np.nan
     # df["rk_naive_1"] = np.nan
@@ -120,7 +120,7 @@ if __name__ == "__main__":
 
     for i, (eps_val, omega_val) in enumerate(combinations):
         print(f"Running benchmark {i + 1}/{len(combinations)}")
-        (err_lapack, rank, err_tight, rank_tight) = bench(eps_val, omega_val)
+        (err_lapack, rank, _, _, err_tight, rank_tight) = bench(eps_val, omega_val)
         df.loc[i] = [
             eps_val,
             omega_val,
@@ -132,8 +132,8 @@ if __name__ == "__main__":
             rank_tight[0],
             # err_naive[1],
             # rank_naive[1],
-            err_tight[1],
-            rank_tight[1],
+            # err_tight[1],
+            # rank_tight[1],
         ]
 
         df.to_csv("general_error_rank_data_bench_2.csv", index=False)

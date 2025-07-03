@@ -49,6 +49,48 @@ def random_matrix(
     return A
 
 
+# Sequence generators
+
+
+def lrf_sequence(rank, length, rng: np.random.Generator):
+
+    # Convert roots to polynomial coefficients
+    coeffs = rng.standard_normal(rank)
+    coeffs /= np.linalg.norm(coeffs)
+
+    # Random initial values (normalized)
+    a = np.zeros(length)
+    a[:rank] = rng.standard_normal(rank)
+    # a[:rank] /= np.linalg.norm(a[:rank])
+
+    for i in range(rank, length):
+        a[i] = np.dot(coeffs, a[i - rank : i])
+        # a[:i] /= np.linalg.norm(a[:i])
+
+    a /= np.linalg.norm(a)
+
+    return a
+
+
+def fid_signal_sequence(rank, length, rng: np.random.Generator):
+
+    # Signal coefficients
+    coeffs = rng.standard_normal(rank)
+    # coeffs /= np.linalg.norm(coeffs)
+
+    # Damp factors
+    tau = rng.uniform(0, 5.0, rank)
+
+    # FID signals
+    ts = np.arange(length)
+    x = np.zeros(length)
+
+    for i, t in enumerate(ts):
+        x[i] = np.dot(coeffs, np.exp(-tau * t))
+
+    return x
+
+
 def array_to_hankel(
     array: np.ndarray,
     shape: tuple[int, int],
@@ -90,10 +132,17 @@ def hankel_to_array(a: np.ndarray):
     return array
 
 
-def random_hankel(n: int, m: int, rng: np.random.Generator, low_rank=True):
-    array = rng.random(size=n + m - 1)
-    if low_rank:
+def random_hankel(
+    n: int, m: int, rng: np.random.Generator, seq_generator="def", rank=20
+):
+    if seq_generator == "def":
+        array = rng.random(size=n + m - 1)
         array = array / np.exp(np.arange(n + m - 1))
+    elif seq_generator == "lrf":
+        array = lrf_sequence(rank, n + m - 1, rng)
+    elif seq_generator == "fid":
+        array = fid_signal_sequence(rank, n + m - 1, rng)
+
     return array_to_hankel(array, (n, m))
 
 

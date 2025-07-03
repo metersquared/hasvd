@@ -3,7 +3,6 @@ import hasvd.utils.trees as trees
 import hasvd.utils.errors as errors
 import hasvd.utils.matrix as matrix
 import hasvd.utils.svd as svd
-from functools import partial
 import numpy as np
 import time as tic
 
