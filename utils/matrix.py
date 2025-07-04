@@ -4,9 +4,7 @@ import scipy.linalg as scla
 # Matrix generators
 
 
-def random_matrix(
-    n: int, m: int, r: int, rng: np.random.Generator, condition_number: float = None
-):
+def random_matrix(m: int, n: int, r: int, rng: np.random.Generator):
     """
     Create a random n by m matrix of rank r with optional control over the condition number.
 
@@ -30,18 +28,16 @@ def random_matrix(
         Random n by m matrix of rank r
     """
     # Generate random orthonormal matrices U and V using SVD
-    U, _, _ = np.linalg.svd(rng.random(size=(n, n)))
-    V, _, _ = np.linalg.svd(rng.random(size=(m, m)))
+    U, _, _ = np.linalg.svd(rng.random(size=(m, m)))
+    V, _, _ = np.linalg.svd(rng.random(size=(n, n)))
+    A = np.random.rand(n, n)
 
-    # Create singular values
-    if condition_number:
-        singular_values = np.geomspace(1, 1 / condition_number, num=r)
-    else:
-        singular_values = np.ones(r)
+    max_dim = max(m, n)
+    eps = np.finfo(np.float64).eps
 
     # Construct the diagonal matrix
-    S = np.zeros((n, m))
-    S[:r, :r] = np.diag(singular_values)
+    S = np.zeros((m, n))
+    S[np.diag_indices(r)] = np.geomspace(1, max_dim * eps, r)
 
     # Generate the rank-r matrix with specified conditioning
     A = U @ S @ V.T
