@@ -1,6 +1,7 @@
 # Trees
 
 from pymor.algorithms.hapod import Node
+import numpy as np
 
 
 class hasvd_Node(Node):
@@ -76,6 +77,9 @@ class hasvd_Node(Node):
                 line += f' (after {",".join(str(a) for a in node.after)})'
             lines.append(line)
         return "\n".join(lines)
+
+
+# One-Level Trees
 
 
 def inc_hasvd_tree(
@@ -182,7 +186,10 @@ def dist_hasvd_tree(
     return root
 
 
-def two_level_bidir_dist_hasvd_tree(
+# Two-Level Bidirectional trees
+
+
+def tlbd_dist_hasvd_tree(
     num_outer_slices: int,
     num_inner_slices: int,
     outer_direction: int = 0,
@@ -232,7 +239,7 @@ def two_level_bidir_dist_hasvd_tree(
     return root
 
 
-def two_level_bidir_inc_hasvd_tree(
+def tlbd_inc_hasvd_tree(
     num_outer_slices: int,
     num_inner_slices: int,
     outer_direction: int = 0,
@@ -302,6 +309,22 @@ def two_level_bidir_inc_hasvd_tree(
             outer_tag += 1
             parent_node = merge_node
     return root
+
+
+def tlbd_general_block_to_leaf_map(
+    A: np.ndarray, M: int, N: int, m: int, n: int, inner_direction: int
+):
+
+    def map(node: hasvd_Node):
+        if inner_direction == 0:
+            row_pos = int(node.tag % M) * m
+            col_pos = int(node.tag // M) * n
+        else:
+            col_pos = int(node.tag % N) * n
+            row_pos = int((node.tag // N)) * m
+        return A[row_pos : row_pos + m, col_pos : col_pos + n]
+
+    return map
 
 
 # Graphs and trees
