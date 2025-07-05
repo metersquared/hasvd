@@ -19,10 +19,8 @@ def nodemap_hasvd(tree: trees.hasvd_Node, A_array, m, n, M, N):
     node_to_block : dict
         A dictionary mapping nodes to their corresponding matrix blocks.
     """
-
     node_to_block = {}
     for node in tree.traverse():
-
         # Check if the node is a leaf node
         if node.is_leaf:
             block_coord = (
@@ -44,23 +42,29 @@ def nodemap_hasvd(tree: trees.hasvd_Node, A_array, m, n, M, N):
 if __name__ == "__main__":
 
     M = 10
-    N = 10
-    m = 1000
-    n = 1000
+    N = 20
+    m = 150
+    n = 150
     rng = np.random.default_rng(12)
-    eps = 1.0e-3
+    eps = 1.0e-4
     omega = 0.1
 
+    # %%
     # Create a random matrix with block size m x n with M xN blocks
-    rng = np.random.default_rng(12)
-    A = matrix.random_hankel(m * M, n * N, rng)
+    A = matrix.random_hankel(m * M, n * N, rng, "fid")
     # print("A:", A)
-    print("Matrix rank:", np.linalg.matrix_rank(A))
+
+    print("Generated random Hankel matrix...")
+    rank = np.linalg.matrix_rank(A)
+    print("Matrix rank sanity check:", rank)
     print("Matrix shape:", A.shape)
+    print("Block shape:", "(", m, ",", n, ")")
+    print("Block partitions:", "(", M, ",", N, ")\n")
 
     A_array = matrix.hankel_to_array(A)
-    print("A_array:", A_array)
+    print("Approximate SVD with tolerance :", eps, " and omega:", omega, "\n")
 
+    print("\u0332".join("LAPACK gesdd"))
     # SVD of the whole matrix
     start = time.time()
     U, E, Vh = svd.svd_with_tol(
@@ -69,17 +73,19 @@ if __name__ == "__main__":
         truncate_tol=eps,
     )
     duration = time.time() - start
-    print("SVD of the whole matrix")
+    rank = len(E)
     print("Error:", np.linalg.norm(A - U @ np.diag(E) @ Vh))
     print("Time of SVD:", duration)
+    print("Rank of U*S*Vt:", np.linalg.matrix_rank(U @ np.diag(E) @ Vh), "\n")
+
     # DISTRIBUTED HASVD
     print("\u0332".join("Distributed HASVD"))
     # Create a tree for the distributed HASVD
-    tree = trees.two_level_bidir_dist_hasvd_tree(M, N, 1, 0, block_shape=(m, n))
+    tree1 = trees.tlbd_dist_hasvd_tree(M, N, 1, block_shape=(m, n))
 
     # Create mapping of nodes to their corresponding matrix blocks
     node_to_block = nodemap_hasvd(
-        tree,
+        tree1,
         A_array,
         m,
         n,
@@ -95,13 +101,13 @@ if __name__ == "__main__":
 
     # Sum non-leaf nodes
     num_nonleaf_nodes = 0
-    for node in tree.traverse():
+    for node in tree1.traverse():
         if not node.is_leaf:
             num_nonleaf_nodes += 1
 
     # Sum of branching nodes
     num_branching_nodes = 0
-    for node in tree.traverse():
+    for node in tree1.traverse():
         if not node.is_leaf and any(not child.is_leaf for child in node.children):
             num_branching_nodes += 1
 
@@ -118,10 +124,16 @@ if __name__ == "__main__":
 
     # SVD of the blocks
     start = time.time()
-    U1, E1, Vh1 = svd.hasvd(tree, get_dist_hasvd_block, local_eps=get_dist_naive_error)
+    U1, E1, Vh1, rank1n = svd.hasvd(
+        tree1, get_dist_hasvd_block, local_eps=get_dist_naive_error, track_ranks=True
+    )
     duration = time.time() - start
-    print("Naive Error:", np.linalg.norm(A - U1 @ np.diag(E1) @ Vh1))
+    print("- Naive Prescription -")
+    print("Error:", np.linalg.norm(A - U1 @ np.diag(E1) @ Vh1))
     print("Time of SVD:", duration)
+    print("Rank of U*S*Vt:", np.linalg.matrix_rank(U1 @ np.diag(E1) @ Vh1), "\n")
+
+    svd.rank_analysis(tree1, rank1n)
 
     # TIGHT ERROR
 
@@ -136,19 +148,26 @@ if __name__ == "__main__":
 
     # SVD of the blocks
     start = time.time()
-    U1, E1, Vh1 = svd.hasvd(tree, get_dist_hasvd_block, local_eps=get_dist_tight_error)
+    U1, E1, Vh1, rank1t = svd.hasvd(
+        tree1, get_dist_hasvd_block, local_eps=get_dist_tight_error, track_ranks=True
+    )
     duration = time.time() - start
-    print("Tight Error:", np.linalg.norm(A - U1 @ np.diag(E1) @ Vh1))
+    print("\n")
+    print("- Tight Prescription -")
+    print("Error:", np.linalg.norm(A - U1 @ np.diag(E1) @ Vh1))
     print("Time of SVD:", duration)
+    print("Rank of U*S*Vt:", np.linalg.matrix_rank(U1 @ np.diag(E1) @ Vh1), "\n")
+    svd.rank_analysis(tree1, rank1t)
 
     # INCREMENTAL HASVD
+    print("\n")
     print("\u0332".join("Incremental HASVD"))
     # Create a tree for the incremental HASVD
-    tree = trees.two_level_bidir_inc_hasvd_tree(M, N, 1, 0, (m, n))
+    tree2 = trees.tlbd_inc_hasvd_tree(M, N, 1, 0, (m, n))
     # trees.draw_nxgraph(tree)
     # Create mapping of nodes to their corresponding matrix blocks
     node_to_block = nodemap_hasvd(
-        tree,
+        tree2,
         A_array,
         m,
         n,
@@ -162,7 +181,7 @@ if __name__ == "__main__":
 
     # Sum non-leaf nodes
     num_nonleaf_nodes = 0
-    for node in tree.traverse():
+    for node in tree2.traverse():
         if not node.is_leaf:
             num_nonleaf_nodes += 1
 
@@ -179,10 +198,16 @@ if __name__ == "__main__":
 
     # SVD of the blocks
     start = time.time()
-    U2, E2, Vh2 = svd.hasvd(tree, get_inc_hasvd_block, local_eps=get_inc_naive_error)
+    U2, E2, Vh2, rank2n = svd.hasvd(
+        tree2, get_inc_hasvd_block, local_eps=get_inc_naive_error, track_ranks=True
+    )
     duration = time.time() - start
-    print("Naive Error:", np.linalg.norm(A - U2 @ np.diag(E2) @ Vh2))
+    print("- Naive Prescription -")
+    print("Error:", np.linalg.norm(A - U2 @ np.diag(E2) @ Vh2))
     print("Time of SVD:", duration)
+    print("Rank of U*S*Vt:", np.linalg.matrix_rank(U2 @ np.diag(E2) @ Vh2), "\n")
+    svd.rank_analysis(tree2, rank2n)
+    print("\n")
 
     # TIGHT ERROR
     # Create a function to get the tight error for a node
@@ -196,8 +221,174 @@ if __name__ == "__main__":
 
     # SVD of the blocks
     start = time.time()
-    U2, E2, Vh2 = svd.hasvd(tree, get_inc_hasvd_block, local_eps=get_inc_tight_error)
+    U2, E2, Vh2, rank2t = svd.hasvd(
+        tree2, get_inc_hasvd_block, local_eps=get_inc_tight_error, track_ranks=True
+    )
     duration = time.time() - start
-    print("Tight Error:", np.linalg.norm(A - U2 @ np.diag(E2) @ Vh2))
+    print("- Tight Prescription -")
+    print("Error:", np.linalg.norm(A - U2 @ np.diag(E2) @ Vh2))
     print("Time of SVD:", duration)
-# %%
+    print("Rank of U*S*Vt:", np.linalg.matrix_rank(U2 @ np.diag(E2) @ Vh2), "\n")
+    svd.rank_analysis(tree2, rank2t)
+
+    # %%
+    # Create a random matrix with block size m x n with M xN blocks
+    A = matrix.random_matrix(m * M, n * N, rank, rng)
+    # print("A:", A)
+    print("Generated random general matrix...")
+    print("Prescribed rank:", rank)
+    print("Matrix rank sanity check:", np.linalg.matrix_rank(A))
+    print("Matrix shape:", A.shape)
+    print("Block shape:", "(", m, ",", n, ")")
+    print("Block partitions:", "(", M, ",", N, ")\n")
+
+    direction = 1
+    print("Approximate SVD with tolerance :", eps, " and omega:", omega, "\n")
+
+    print("\u0332".join("LAPACK gesdd"))
+    # SVD of the whole matrix
+    start = time.time()
+    U, E, Vh = svd.svd_with_tol(
+        A,
+        full_matrices=False,
+        truncate_tol=eps,
+    )
+    duration = time.time() - start
+    print("Error:", np.linalg.norm(A - U @ np.diag(E) @ Vh))
+    print("Time of SVD:", duration)
+    print("Rank of U*S*Vt:", np.linalg.matrix_rank(U @ np.diag(E) @ Vh), "\n")
+
+    # DISTRIBUTED HASVD
+    print("\u0332".join("Distributed HASVD"))
+    # Create a tree for the distributed HASVD
+    tree1 = trees.tlbd_dist_hasvd_tree(M, N, 1, block_shape=(m, n))
+
+    def node_to_block_map(node: trees.hasvd_Node):
+        if direction == 0:
+            row_pos = int(node.tag % M) * m
+            col_pos = int(node.tag // M) * n
+        else:
+            col_pos = int(node.tag % N) * n
+            row_pos = int((node.tag // N)) * m
+        return A[row_pos : row_pos + m, col_pos : col_pos + n]
+
+    # Create mapping of nodes to their corresponding naive error
+
+    # Sum non-leaf nodes
+    num_nonleaf_nodes = 0
+    for node in tree1.traverse():
+        if not node.is_leaf:
+            num_nonleaf_nodes += 1
+
+    # Sum of branching nodes
+    num_branching_nodes = 0
+    for node in tree1.traverse():
+        if not node.is_leaf and any(not child.is_leaf for child in node.children):
+            num_branching_nodes += 1
+
+    # NAIVE ERROR
+
+    # Create a function to get the naive error for a node
+    def get_dist_naive_error(node):
+        return errors.naive_error(
+            node,
+            eps,
+            omega,
+            num_nonleaf_nodes,
+        )
+
+    # SVD of the blocks
+    start = time.time()
+    U1, E1, Vh1, rank1n = svd.hasvd(
+        tree1, node_to_block_map, local_eps=get_dist_naive_error, track_ranks=True
+    )
+    duration = time.time() - start
+    print("- Naive Prescription -")
+    print("Error:", np.linalg.norm(A - U1 @ np.diag(E1) @ Vh1))
+    print("Time of SVD:", duration)
+    print("Rank of U*S*Vt:", np.linalg.matrix_rank(U1 @ np.diag(E1) @ Vh1), "\n")
+
+    svd.rank_analysis(tree1, rank1n)
+
+    # TIGHT ERROR
+
+    # Create a function to get the tight error for a node
+    def get_dist_tight_error(node):
+        return errors.tight_error(
+            node,
+            eps,
+            omega,
+            num_branching_nodes,
+        )
+
+    # SVD of the blocks
+    start = time.time()
+    U1, E1, Vh1, rank1t = svd.hasvd(
+        tree1, node_to_block_map, local_eps=get_dist_tight_error, track_ranks=True
+    )
+    duration = time.time() - start
+    print("\n")
+    print("- Tight Prescription -")
+    print("Error:", np.linalg.norm(A - U1 @ np.diag(E1) @ Vh1))
+    print("Time of SVD:", duration)
+    print("Rank of U*S*Vt:", np.linalg.matrix_rank(U1 @ np.diag(E1) @ Vh1), "\n")
+    svd.rank_analysis(tree1, rank1t)
+    print("\n")
+
+    # INCREMENTAL HASVD
+    print("\u0332".join("Incremental HASVD"))
+    # Create a tree for the incremental HASVD
+    tree2 = trees.tlbd_inc_hasvd_tree(M, N, 1, 0, (m, n))
+    # trees.draw_nxgraph(tree)
+
+    # Sum non-leaf nodes
+    num_nonleaf_nodes = 0
+    for node in tree2.traverse():
+        if not node.is_leaf:
+            num_nonleaf_nodes += 1
+
+    # NAIVE ERROR
+
+    # Create a function to get the naive error for a node
+    def get_inc_naive_error(node):
+        return errors.naive_error(
+            node,
+            eps,
+            omega,
+            num_nonleaf_nodes,
+        )
+
+    # SVD of the blocks
+    start = time.time()
+    U2, E2, Vh2, rank2n = svd.hasvd(
+        tree2, node_to_block_map, local_eps=get_inc_naive_error, track_ranks=True
+    )
+    duration = time.time() - start
+    print("- Naive Prescription -")
+    print("Error:", np.linalg.norm(A - U2 @ np.diag(E2) @ Vh2))
+    print("Time of SVD:", duration)
+    print("Rank of U*S*Vt:", np.linalg.matrix_rank(U2 @ np.diag(E2) @ Vh2), "\n")
+    svd.rank_analysis(tree2, rank2n)
+    print("\n")
+
+    # TIGHT ERROR
+    # Create a function to get the tight error for a node
+    def get_inc_tight_error(node):
+        return errors.tight_error(
+            node,
+            eps,
+            omega,
+            num_nonleaf_nodes,
+        )
+
+    # SVD of the blocks
+    start = time.time()
+    U2, E2, Vh2, rank2t = svd.hasvd(
+        tree2, node_to_block_map, local_eps=get_inc_tight_error, track_ranks=True
+    )
+    duration = time.time() - start
+    print("- Tight Prescription -")
+    print("Error:", np.linalg.norm(A - U2 @ np.diag(E2) @ Vh2))
+    print("Time of SVD:", duration)
+    print("Rank of U*S*Vt:", np.linalg.matrix_rank(U2 @ np.diag(E2) @ Vh2), "\n")
+    svd.rank_analysis(tree2, rank2t)

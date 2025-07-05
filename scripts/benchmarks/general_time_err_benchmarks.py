@@ -24,8 +24,6 @@ def bench(tol, omega, partitions, total_m, total_n):
         partition = N
         block_n = n
         block_m = M * m
-        outer_direction = 0
-        inner_direction = 1
         outer_slices = N
         inner_slices = M
     else:
@@ -36,20 +34,14 @@ def bench(tol, omega, partitions, total_m, total_n):
         partition = M
         block_n = N * n
         block_m = m
-        outer_direction = 1
-        inner_direction = 0
         outer_slices = M
         inner_slices = N
 
     tree_list = [
         trees.dist_hasvd_tree(partition, direction, (block_m, block_n)),
         trees.inc_hasvd_tree(partition, direction, (block_m, block_n)),
-        trees.two_level_bidir_dist_hasvd_tree(
-            outer_slices, inner_slices, outer_direction, inner_direction, (m, n)
-        ),
-        trees.two_level_bidir_inc_hasvd_tree(
-            outer_slices, inner_slices, outer_direction, inner_direction, (m, n)
-        ),
+        trees.tlbd_dist_hasvd_tree(outer_slices, inner_slices, direction, (m, n)),
+        trees.tlbd_inc_hasvd_tree(outer_slices, inner_slices, direction, (m, n)),
     ]
 
     for tree in tree_list:
@@ -70,10 +62,10 @@ def bench(tol, omega, partitions, total_m, total_n):
 
     for i in range(trials):
         A = matrix.random_matrix(m * M, n * N, set_rank, rng, cond_num)
-        U, S, Vt = svd.svd_with_tol(A, truncate_tol=tol)
         start = tic.time()
-        err_lapack[i] = np.linalg.norm(A - U @ np.diag(S) @ Vt)
+        U, S, Vt = svd.svd_with_tol(A, truncate_tol=tol)
         time_lapack[i] = tic.time() - start
+        err_lapack[i] = np.linalg.norm(A - U @ np.diag(S) @ Vt)
         rank[i] = len(S)
 
         for idx, tree in enumerate(tree_list):
@@ -84,25 +76,18 @@ def bench(tol, omega, partitions, total_m, total_n):
 
             if idx < 2:
 
-                def node_to_block_map(node: trees.hasvd_Node):
-                    if direction == 0:
-                        return A[:, node.tag * n : (node.tag + 1) * n]
-                    else:
-                        return A[node.tag * m : (node.tag + 1) * m, :]
+                leaf_to_block_map = trees.linear_general_btl_map(
+                    A, block_m, block_n, direction
+                )
 
             else:
 
-                def node_to_block_map(node: trees.hasvd_Node):
-                    if direction == 0:
-                        row_pos = int(node.tag % M) * m
-                        col_pos = int(node.tag // M) * n
-                    else:
-                        col_pos = int(node.tag % N) * n
-                        row_pos = int((node.tag // N)) * m
-                    return A[row_pos : row_pos + m, col_pos : col_pos + n]
+                leaf_to_block_map = trees.tlbd_general_btl_map(
+                    A, M, N, block_m, block_n, direction
+                )
 
             start = tic.time()
-            U, S, Vt = svd.hasvd(tree, node_to_block_map, local_eps=nodal_error)
+            U, S, Vt = svd.hasvd(tree, leaf_to_block_map, local_eps=nodal_error)
             time[idx][i] = tic.time() - start
             err_tight[idx][i] = np.linalg.norm(A - U @ np.diag(S) @ Vt)
             rank_tight[idx][i] = len(S)
@@ -121,7 +106,7 @@ def bench(tol, omega, partitions, total_m, total_n):
 if __name__ == "__main__":
     sizes = [100, 200, 400, 500, 800, 1000, 2000, 4000, 5000, 8000, 10000]
     partitions = [10]
-    eps = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
+    eps = [1e-5, 1e-10]
     omegas = [0.1, 0.9]
 
     combinations = [

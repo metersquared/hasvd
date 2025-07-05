@@ -14,14 +14,14 @@ rng = np.random.default_rng(42)
 track_ranks = True
 
 # Number of blocks
-partition = 50
+partition = 10
 # Block size
-m = 1000
-n = 50
+m = 2000
+n = 200
 # Direction of partitioning
 direction = 0
 # Rank of matrix
-rank = 25
+rank = 8
 
 if direction == 0:
     M = 1
@@ -30,7 +30,7 @@ else:
     M = partition
     N = 1
 
-A = matrix.random_matrix(M * m, N * n, r=rank, rng=rng, condition_number=1e3)
+A = matrix.random_matrix(M * m, N * n, r=rank, rng=rng, condition_number=2.7e102)
 
 print(
     "Block number:",
@@ -54,7 +54,7 @@ print(
 print("\u0332".join("Approx. with LAPACK SVD"))
 
 # Tolerance for SVD
-tol = 1e-4
+tol = 1e-10
 start = time.time()
 U, S, Vt = svd.svd_with_tol(A, truncate_tol=tol)
 duration = time.time() - start
@@ -119,7 +119,7 @@ U, S, Vt, ranks = svd.hasvd(
 
 print("Rank of approximation:", len(S))
 print("Frobenius norm of error:", np.linalg.norm(A - U @ np.diag(S) @ Vt))
-# svd.rank_analysis(tree, ranks)
+svd.rank_analysis(tree, ranks)
 
 # %%
 # APPROX. WITH BLOCK INC HASVD
@@ -158,7 +158,7 @@ print("Time for SVD:", duration, "seconds")
 
 print("Rank of approximation:", len(S))
 print("Frobenius norm of error:", np.linalg.norm(A - U @ np.diag(S) @ Vt))
-# svd.rank_analysis(tree, ranks)
+svd.rank_analysis(tree, ranks)
 
 # Tight error in HASVD
 print("Tight error in HASVD:")
@@ -178,7 +178,7 @@ print("Time for SVD:", duration, "seconds")
 
 print("Rank of approximation:", len(S))
 print("Frobenius norm of error:", np.linalg.norm(A - U @ np.diag(S) @ Vt))
-# svd.rank_analysis(tree, ranks)
+svd.rank_analysis(tree, ranks)
 
 
 # Uniform error in HASVD

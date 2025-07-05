@@ -1,6 +1,7 @@
-# Trees
+# TREES
 
 from pymor.algorithms.hapod import Node
+from hasvd.utils.matrix import array_to_hankel
 import numpy as np
 
 
@@ -55,19 +56,19 @@ class hasvd_Node(Node):
                     p = p.parent
                 match node.direction:
                     case 0:
-                        line += "+-o"
+                        line += "+-c"
                     case 1:
                         line += "+-r"
                     case 2:
-                        line += "+-c"
+                        line += "+-l"
             else:
                 match node.direction:
                     case 0:
-                        line += "o"
+                        line += "c"
                     case 1:
                         line += "r"
                     case 2:
-                        line += "c"
+                        line += "l"
             if node.tag is not None:
                 line += f" {node.tag}"
 
@@ -186,6 +187,102 @@ def dist_hasvd_tree(
     return root
 
 
+def linear_general_btl_map(A: np.ndarray, m: int, n: int, direction: int):
+    """Block-to-leaf map generator connecting general matrices to two-level bidirectional trees.
+
+    Parameters
+    ----------
+    A : np.ndarray
+        Matrix
+    partitions : int
+        Number of partitions
+    m : int
+        Row size of block
+    n : int
+        Column size of block
+    direction : int
+        Direction of aggregation
+    """
+
+    def map(node: hasvd_Node):
+        """Block-to-leaf map of general matrix for two-level bidirectional trees.
+
+        Parameters
+        ----------
+        node : hasvd_Node
+            Node in tree.
+
+        Returns
+        -------
+        np.ndarray
+            Block to corresponding node.
+        """
+        assert node.is_leaf, "Node is not leaf."
+        if direction == 0:
+            row_pos = 0
+            col_pos = int(node.tag) * n
+        elif direction == 1:
+            row_pos = int(node.tag) * m
+            col_pos = 0
+        return A[row_pos : row_pos + m, col_pos : col_pos + n]
+
+    return map
+
+
+def linear_hankelarray_btl_map(
+    A_array: np.ndarray, partitions, m: int, n: int, direction: int
+):
+    """Block-to-leaf map generator connecting Hankel matrices to two-level bidirectional trees.
+
+    Parameters
+    ----------
+    A : np.ndarray
+        Hankel element sequence
+    partitions : int
+        Number of partitions
+    m : int
+        Row size of block
+    n : int
+        Column size of block
+    direction : int
+        Direction of aggregation
+    """
+
+    def map(node: hasvd_Node):
+        """Block-to-leaf map of Hankel matrix for two-level bidirectional trees.
+
+        Parameters
+        ----------
+        node : hasvd_Node
+            Node in tree.
+
+        Returns
+        -------
+        np.ndarray
+            Block to corresponding node.
+        """
+        assert node.is_leaf, "Node is not leaf."
+
+        if direction == 0:
+            M = 1
+            N = partitions
+            row_pos = 0
+            col_pos = int(node.tag) * n
+        elif direction == 1:
+            M = partitions
+            N = 1
+            row_pos = int(node.tag) * m
+            col_pos = 0
+        return array_to_hankel(
+            A_array,
+            (m * M, n * N),
+            (row_pos, col_pos),
+            (m, n),
+        )
+
+    return map
+
+
 # Two-Level Bidirectional trees
 
 
@@ -193,7 +290,6 @@ def tlbd_dist_hasvd_tree(
     num_outer_slices: int,
     num_inner_slices: int,
     outer_direction: int = 0,
-    inner_direction: int = 1,
     block_shape: tuple[int, int] = None,
 ):
     """
@@ -207,58 +303,6 @@ def tlbd_dist_hasvd_tree(
         Number of inner slices per outer group (inner partitions).
     outer_direction : int, optional
         Aggregation direction at the outer level (default: 0).
-    inner_direction : int, optional
-        Aggregation direction at the inner level (default: 1).
-
-    Returns
-    -------
-    hasvd_Node
-        Root of the constructed HASVD tree.
-    """
-    total_slices = num_outer_slices * num_inner_slices
-    root = hasvd_Node(
-        tag="r",
-        direction=outer_direction,
-        shape=(num_outer_slices * block_shape[0], num_inner_slices * block_shape[1]),
-    )
-
-    # Inner nodes get tags 0, 1, ..., total_slices-1
-    # Outer nodes get tags total_slices, total_slices+1, ...
-    outer_tag = total_slices
-    for outer_idx in range(num_outer_slices):
-        outer_node = root.add_child(
-            tag=outer_tag,
-            direction=inner_direction,
-            shape=(block_shape[0], num_inner_slices * block_shape[1]),
-        )
-        outer_tag += 1
-        for inner_idx in range(num_inner_slices):
-            inner_tag = outer_idx * num_inner_slices + inner_idx
-            outer_node.add_child(tag=inner_tag, shape=(block_shape[0], block_shape[1]))
-
-    return root
-
-
-def tlbd_inc_hasvd_tree(
-    num_outer_slices: int,
-    num_inner_slices: int,
-    outer_direction: int = 0,
-    inner_direction: int = 1,
-    block_shape: tuple[int, int] = None,
-):
-    """
-    Build a two-level hierarchical HASVD tree with full control over slice partitioning and directions.
-
-    Parameters
-    ----------
-    num_outer_slices : int
-        Number of top-level groups (outer partitions).
-    num_inner_slices : int
-        Number of inner slices per outer group (inner partitions).
-    outer_direction : int, optional
-        Aggregation direction at the outer level (default: 0).
-    inner_direction : int, optional
-        Aggregation direction at the inner level (default: 1).
 
     Returns
     -------
@@ -268,13 +312,72 @@ def tlbd_inc_hasvd_tree(
     total_m = block_shape[0]
     total_n = block_shape[1]
     if outer_direction == 0:
-        total_n = total_n * num_outer_slices
+        total_n *= num_outer_slices
+        total_m *= num_inner_slices
     else:
-        total_m = total_m * num_outer_slices
-    if inner_direction == 0:
-        total_n = total_n * num_inner_slices
+        total_m *= num_outer_slices
+        total_n *= num_inner_slices
+    total_leaves = num_outer_slices * num_inner_slices
+    root = hasvd_Node(
+        tag="r",
+        direction=outer_direction,
+        shape=(total_m, total_n),
+    )
+
+    # Inner nodes get tags 0, 1, ..., total_slices-1
+    # Outer nodes get tags total_slices, total_slices+1, ...
+    outer_tag = total_leaves
+    match outer_direction:
+        case 0:
+            shape = (total_m, block_shape[1])
+        case 1:
+            shape = (block_shape[0], total_n)
+    for outer_idx in range(num_outer_slices):
+        outer_node = root.add_child(
+            tag=outer_tag,
+            direction=(outer_direction + 1) % 2,
+            shape=shape,
+        )
+        outer_tag += 1
+        for inner_idx in range(num_inner_slices):
+            inner_tag = outer_idx * num_inner_slices + inner_idx
+            outer_node.add_child(tag=inner_tag, shape=block_shape)
+
+    return root
+
+
+def tlbd_inc_hasvd_tree(
+    num_outer_slices: int,
+    num_inner_slices: int,
+    outer_direction: int = 0,
+    block_shape: tuple[int, int] = None,
+):
+    """
+    Build a two-level hierarchical HASVD tree with full control over slice partitioning and directions.
+
+    Parameters
+    ----------
+    num_outer_slices : int
+        Number of top-level groups (outer partitions).
+    num_inner_slices : int
+        Number of inner slices per outer group (inner partitions).
+    outer_direction : int, optional
+        Aggregation direction at the outer level (default: 0).
+
+    Returns
+    -------
+    hasvd_Node
+        Root of the constructed HASVD tree.
+    """
+    total_m = block_shape[0]
+    total_n = block_shape[1]
+
+    if outer_direction == 0:
+        total_n *= num_outer_slices
+        total_m *= num_inner_slices
     else:
-        total_m = total_m * num_inner_slices
+        total_n *= num_inner_slices
+        total_m *= num_outer_slices
 
     total_leaves = num_outer_slices * num_inner_slices
     root = hasvd_Node(
@@ -288,35 +391,72 @@ def tlbd_inc_hasvd_tree(
     parent_node = root
 
     for outer_idx in range(num_outer_slices):
+        match outer_direction:
+            case 0:
+                shape = (total_m, block_shape[1])
+            case 1:
+                shape = (block_shape[0], total_n)
         outer_node = parent_node.add_child(
             tag=outer_tag,
-            direction=inner_direction,
-            shape=(block_shape[0], num_inner_slices * block_shape[1]),
+            direction=(outer_direction + 1) % 2,
+            shape=shape,
         )
         outer_tag += 1
         for inner_idx in range(num_inner_slices):
-            outer_node.add_child(tag=leaf_tag, shape=(block_shape[0], block_shape[1]))
+            outer_node.add_child(tag=leaf_tag, shape=block_shape)
             leaf_tag += 1
         if outer_idx < num_outer_slices - 2:
+            match outer_direction:
+                case 0:
+                    shape = (total_m, total_n - (1 + outer_idx) * block_shape[1])
+                case 1:
+                    shape = (total_m - (1 + outer_idx) * block_shape[0], total_n)
             merge_node = parent_node.add_child(
                 tag=outer_tag,
                 direction=outer_direction,
-                shape=(
-                    (num_outer_slices - 1 - outer_idx) * block_shape[0],
-                    num_inner_slices * block_shape[1],
-                ),
+                shape=shape,
             )
             outer_tag += 1
             parent_node = merge_node
     return root
 
 
-def tlbd_general_block_to_leaf_map(
-    A: np.ndarray, M: int, N: int, m: int, n: int, inner_direction: int
+def tlbd_general_btl_map(
+    A: np.ndarray, M: int, N: int, m: int, n: int, outer_direction: int
 ):
+    """Block-to-leaf map generator connecting general matrices to two-level bidirectional trees.
+
+    Parameters
+    ----------
+    A : np.ndarray
+        Matrix
+    M : int
+        Number of row blocks
+    N : int
+        Number of column blocks
+    m : int
+        Row size of block
+    n : int
+        Column size of block
+    outer_direction : int
+        Outer top-level direction of aggregation
+    """
 
     def map(node: hasvd_Node):
-        if inner_direction == 0:
+        """Block-to-leaf map of general matrix for two-level bidirectional trees.
+
+        Parameters
+        ----------
+        node : hasvd_Node
+            Node in tree.
+
+        Returns
+        -------
+        np.ndarray
+            Block to corresponding node.
+        """
+        assert node.is_leaf, "Node is not leaf."
+        if outer_direction == 0:
             row_pos = int(node.tag % M) * m
             col_pos = int(node.tag // M) * n
         else:
@@ -327,10 +467,53 @@ def tlbd_general_block_to_leaf_map(
     return map
 
 
+def tlbd_hankelarray_btl_map(
+    A_array: np.ndarray, M: int, N: int, m: int, n: int, outer_direction: int
+):
+    """Block-to-leaf map connecting Hankel matrices to two-linear bidirectional trees.
+
+    Parameters
+    ----------
+    A_array : np.ndarray
+        Hankel element sequence
+    M : int
+        Number of row blocks
+    N : int
+        Number of column blocks
+    m : int
+        Row size of block
+    n : int
+        Column size of block
+    outer_direction : int
+        Outer top-level direction of aggregation
+    """
+
+    def map(node: hasvd_Node):
+
+        if outer_direction == 0:
+            row_pos = node.tag % M * m
+            col_pos = int(node.tag // M) * n
+        else:
+            row_pos = int((node.tag // N)) * m
+            col_pos = node.tag % N * n
+
+        return array_to_hankel(
+            A_array,
+            (m * M, n * N),
+            (row_pos, col_pos),
+            (m, n),
+        )
+
+    return map
+
+
 # Graphs and trees
 
 import networkx as nx
 import matplotlib.pyplot as plt
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize
+import matplotlib.patheffects as path_effects
 import numpy as np
 
 rng = np.random.default_rng(42)
@@ -466,20 +649,20 @@ def draw_nxgraph(root: hasvd_Node, node_size=1000):
     rowNodes = []
 
     # Specify the root node
-    root_node = root.tag
+    root_node = root
 
     # Add edges (example)
     for node in root.traverse():
-        nxG.add_node(node.tag)
-        if node.parent and node.tag != root.tag:
-            nxG.add_edge(node.parent.tag, node.tag)
+        nxG.add_node(node)
+        if node.parent and node != root:
+            nxG.add_edge(node.parent, node)
         match node.direction:
             case 2:
-                leafNodes.append(node.tag)
+                leafNodes.append(node)
             case 0:
-                rowNodes.append(node.tag)
+                rowNodes.append(node)
             case 1:
-                columnNodes.append(node.tag)
+                columnNodes.append(node)
 
     # Generate the layout using graphviz_layout
     pos = nx.nx_agraph.graphviz_layout(
@@ -511,6 +694,66 @@ def draw_nxgraph(root: hasvd_Node, node_size=1000):
         font_size=24,
         font_color="black",
     )
+
+
+def plot_rank_graph(root: hasvd_Node, node_rank_map, cmap="RdYlGn_r"):
+    G = nx.DiGraph()
+    color_vals = []
+
+    G.add_node(root)
+    color_vals.append(node_rank_map.get(root, 0))
+
+    for node in root.traverse():
+        for child in node.children:
+            G.add_node(child)
+            G.add_edge(node, child)
+            color_vals.append(node_rank_map.get(child, 0))
+
+    # Generate the layout using graphviz_layout
+    pos = nx.nx_agraph.graphviz_layout(
+        G,
+        prog="dot",
+        args=f"-Groot={root.tag}",
+    )
+
+    # Create figure and axis manually
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # Draw nodes and edges
+    nx.draw_networkx_nodes(
+        G, pos, node_color=color_vals, cmap=plt.get_cmap(cmap), ax=ax, node_size=1000
+    )
+    nx.draw_networkx_edges(G, pos, ax=ax)
+
+    for node, (x, y) in pos.items():
+        val = node_rank_map.get(node, 0)
+        label = f"{val}"
+        ax.text(
+            x,
+            y,
+            label,
+            fontsize=12,
+            ha="center",
+            va="center",
+            color="white",
+            path_effects=[
+                path_effects.Stroke(linewidth=1.5, foreground="black"),
+                path_effects.Normal(),
+            ],
+        )
+
+    # Add colorbar manually with mappable
+    sm = ScalarMappable(
+        norm=Normalize(vmin=min(color_vals), vmax=max(color_vals)), cmap=cmap
+    )
+    sm.set_array([])  # Required for matplotlib >= 3.1
+    cbar = fig.colorbar(sm, ax=ax)
+    cbar.set_label("Truncated Rank")
+
+    ax.set_title("HASVD Hierarchical Rank Map")
+    plt.axis("off")
+    plt.tight_layout()
+    plt.show()
 
 
 # Utils counter

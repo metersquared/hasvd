@@ -126,13 +126,14 @@ from pymor.algorithms.hapod import LifoExecutor, FakeExecutor, std_local_eps
 
 
 def hasvd(
-    tree,
+    tree: hasvd_Node,
     snapshots,
     local_eps,
     svd_method=svd_with_tol,
     executor=None,
     eval_snapshots_in_executor=False,
     track_ranks=False,
+    cache_map=None,
 ):
     """Hierarchical Approximate SVD with optional rank tracking
 
@@ -189,19 +190,20 @@ def hasvd(
                 A = await executor.submit(snapshots, node)
             else:
                 A = snapshots(node)
-            U_parts, svals_parts, Vh_parts = svd_method(
-                A, full_matrices=False, truncate_tol=eps
-            )
+            key = cache_map(node) if cache_map else None
+            U_parts, svals_parts, Vh_parts = try_cached_svd(key, A, eps)
 
         # for non-root nodes or after assembling A
         eps = local_eps(node)
         if eps:
             if node.children:
                 if node.direction == 0:
-                    U, svals, Vh = svd_method(A, full_matrices=False, truncate_tol=eps)
+                    key = cache_map(node) if cache_map else None
+                    U, svals, Vh = try_cached_svd(key, A, eps)
                     Vh = Vh @ scla.block_diag(*Vh_parts)
                 else:
-                    V, svals, Uh = svd_method(A, full_matrices=False, truncate_tol=eps)
+                    key = cache_map(node) if cache_map else None
+                    V, svals, Uh = try_cached_svd(key, A, eps)
                     U = scla.block_diag(*U_parts) @ Uh.T
                     Vh = V.T
             else:
@@ -223,6 +225,22 @@ def hasvd(
         else:
             return U, svals, Vh
 
+    # Caching functionality
+
+    svd_cache = {}
+
+    def try_cached_svd(key, A, truncate_tol):
+        if cache_map is None:
+            return svd_method(A, full_matrices=False, truncate_tol=truncate_tol)
+
+        if key in svd_cache:
+            logger.debug(f"[CACHE-HIT] for key: {key}")
+            return svd_cache[key]
+
+        U, s, Vh = svd_method(A, full_matrices=False, truncate_tol=truncate_tol)
+        svd_cache[key] = (U, s, Vh)
+        return U, s, Vh
+
     # executor setup
     if executor is not None:
         executor = LifoExecutor(executor)
@@ -241,6 +259,27 @@ def hasvd(
     hasvd_thread.join()
 
     return result
+
+
+# Caching
+
+
+def logical_key_policy(node: hasvd_Node):
+    """A simple caching key policy
+
+    Parameters
+    ----------
+    node : hasvd_Node
+        Node of given tree
+
+    Returns
+    -------
+    tuple
+        Caching key tuples (tag, direction)
+    """
+    if node.tag is None:
+        return None
+    return (node.tag, node.direction)
 
 
 def rank_analysis(tree: hasvd_Node, ranks):

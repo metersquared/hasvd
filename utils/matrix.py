@@ -1,46 +1,59 @@
 import numpy as np
 import scipy.linalg as scla
+from typing import Literal
 
 # Matrix generators
 
 
-def random_matrix(m: int, n: int, r: int, rng: np.random.Generator):
+def random_matrix(
+    m: int,
+    n: int,
+    r: int,
+    rng: np.random.Generator,
+    method: Literal["svd", "qr"] = "qr",
+):
     """
     Create a random n by m matrix of rank r with optional control over the condition number.
 
     Parameters
     ----------
-    n : int
-        Row size
     m : int
+        Row size
+    n : int
         Column size
     r : int
         Matrix rank
     rng : np.random.Generator
         Random number generator
-    condition_number : float, optional
-        Desired condition number (ratio of largest to smallest singular value).
-        If None, singular values will be uniform.
+    method : Literal[&quot;svd&quot;, &quot;qr&quot;], optional
+        Method of random matrix generation, by default "qr"
+
 
     Returns
     -------
     np.ndarray
         Random n by m matrix of rank r
     """
+
     # Generate random orthonormal matrices U and V using SVD
-    U, _, _ = np.linalg.svd(rng.random(size=(m, m)))
-    V, _, _ = np.linalg.svd(rng.random(size=(n, n)))
-    A = np.random.rand(n, n)
+    U = rng.random(size=(m, m))
+    V = rng.random(size=(n, n))
+    match method:
+        case "svd":
+            U, _, _ = np.linalg.svd(U)
+            V, _, _ = np.linalg.svd(V)
+        case "qr":
+            U, V = np.linalg.qr(U)[0], np.linalg.qr(V)[0]
 
     max_dim = max(m, n)
-    eps = np.finfo(np.float64).eps
+    eps = np.finfo(np.float32).eps
 
     # Construct the diagonal matrix
     S = np.zeros((m, n))
     S[np.diag_indices(r)] = np.geomspace(1, max_dim * eps, r)
 
     # Generate the rank-r matrix with specified conditioning
-    A = U @ S @ V.T
+    A = U @ S @ V
 
     return A
 
@@ -129,7 +142,7 @@ def hankel_to_array(a: np.ndarray):
 
 
 def random_hankel(
-    n: int, m: int, rng: np.random.Generator, seq_generator="def", rank=20
+    m: int, n: int, rng: np.random.Generator, seq_generator="def", rank=20
 ):
     if seq_generator == "def":
         array = rng.random(size=n + m - 1)
